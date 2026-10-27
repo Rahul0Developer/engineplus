@@ -105,7 +105,7 @@ def train_and_evaluate(cfg: TrainConfig) -> dict[str, Any]:
     }
 
     # 90% interval coverage check, if the model offers quantiles at all.
-    if cfg.model == "gru":
+    if cfg.model in ("gru", "xgb"):
         try:
             q = model.predict_quantiles(prep.test_X, [0.05, 0.95])
             lo, hi = q[0.05], q[0.95]
