@@ -24,9 +24,18 @@ import json
 import sys
 from pathlib import Path
 
+import enginepulse
 from enginepulse.utils import get_logger, load_config
 
 logger = get_logger("enginepulse.cli")
+
+
+def _version_string() -> str:
+    """Package version plus git hash when running from a checkout."""
+    from enginepulse.utils import git_hash
+
+    h = git_hash()
+    return f"enginepulse {enginepulse.__version__}" + (f" ({h})" if h != "unknown" else "")
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -41,6 +50,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="enginepulse", description=__doc__.splitlines()[0])
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--version", action="version", version=_version_string())
     sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("download", help="Fetch/verify the NASA C-MAPSS files")
@@ -202,6 +212,9 @@ def main(argv: list[str] | None = None) -> int:
             results = run_benchmark(models=models, datasets=datasets, seeds=seeds,
                                     base={k: v for k, v in d.items() if k != "model_params"},
                                     data_dir=args.data_dir, output_dir=args.output_dir)
+            if not results:
+                print("Benchmark produced no results — see the errors above.", file=sys.stderr)
+                return 1
             table = make_table(results, title=f"Benchmark ({len(results)} runs)")
             print(table)
             out = write_table(results, args.table_out)

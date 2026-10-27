@@ -1,0 +1,2 @@
+[console_scripts]
+enginepulse = enginepulse.__main__:run

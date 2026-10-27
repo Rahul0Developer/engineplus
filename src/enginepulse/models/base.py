@@ -65,7 +65,15 @@ class RULModel(ABC):
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "seed": self.seed, "params": self.params}
 
-    def _write_meta(self, directory: Path, extra: dict | None = None) -> None:
+    def _write_meta(self, path: str | Path, extra: dict | None = None) -> None:
+        """Write meta.json next to a model artifact.
+
+        ``path`` may be the artifact file itself or its directory; either way
+        meta.json lands in the same directory as the weights.
+        """
+        p = Path(path)
+        directory = p.parent if p.suffix else p
+        directory.mkdir(parents=True, exist_ok=True)
         meta = self.describe()
         if extra:
             meta.update(extra)
@@ -73,8 +81,13 @@ class RULModel(ABC):
 
 
 def clip_rul(pred: np.ndarray, max_rul: float | None) -> np.ndarray:
-    """Clamp predictions into [0, max_rul]; models share this convention."""
-    out = np.clip(np.asarray(pred, dtype=np.float32), 0.0, np.inf)
+    """Clamp predictions into [0, max_rul]; models share this convention.
+
+    NaN/Inf are treated as invalid model output and floored to 0.0 so a
+    degenerate prediction can never silently poison a metric computation.
+    """
+    arr = np.nan_to_num(np.asarray(pred, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    out = np.clip(arr, 0.0, np.inf)
     if max_rul is not None:
         out = np.minimum(out, float(max_rul))
     return out
