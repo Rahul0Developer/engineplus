@@ -94,7 +94,11 @@ def create_app(
                         "Check which model/dataset you trained on."),
             )
         Xn = lm.normalise(X)
-        preds = lm.model.predict(Xn)
+        try:
+            preds = lm.model.predict(Xn)
+        except ValueError as exc:
+            # Feature-width mismatches etc. — a client-shape problem, not a crash.
+            raise HTTPException(status_code=422, detail=f"model rejected input: {exc}") from exc
 
         lo = hi = None
         if req.with_interval:
@@ -104,6 +108,8 @@ def create_app(
                 if np.isnan(lo).any():
                     lo = hi = None
             except (RuntimeError, NotImplementedError):
+                lo = hi = None
+            if lo is None:
                 # No native quantiles: fall back to frozen validation-residual
                 # bounds shipped alongside the artifact (see trainer).
                 b = getattr(lm, "residual_bounds", None)

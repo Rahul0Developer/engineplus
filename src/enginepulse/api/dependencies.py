@@ -85,7 +85,9 @@ class ModelRegistry:
         scaler = FeatureScaler.from_state(scaler_bundle["scaler_state"])
         feature_cols = scaler_bundle["feature_cols"]
 
-        model = build_model(model_name, seed=seed)
+        # max_rul is a constructor arg for every model that uses it; passing it
+        # here keeps the served clipping identical to training-time clipping.
+        model = build_model(model_name, seed=seed, max_rul=meta.get("max_rul"))
         model.load(art)
 
         bounds = scaler_bundle.get("residual_bounds")

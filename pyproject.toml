@@ -55,6 +55,8 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.4",
+    "mypy>=1.8",
+    "hypothesis>=6.90",
     "httpx>=0.27",          # FastAPI TestClient transport
     "xgboost>=2.0",
 ]
@@ -64,7 +66,7 @@ Homepage = "https://github.com/yourusername/enginepulse"
 Issues = "https://github.com/yourusername/enginepulse/issues"
 
 [project.scripts]
-enginepulse = "enginepulse.cli:main"
+enginepulse = "enginepulse.__main__:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

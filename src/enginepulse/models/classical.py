@@ -35,7 +35,7 @@ class ConstantBaseline(RULModel):
 
     def save(self, path):
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         joblib.dump({"const": self.const_}, p / "model.joblib")
         self._write_meta(p)
 
@@ -89,7 +89,7 @@ class RidgeModel(RULModel):
 
     def save(self, path):
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         joblib.dump(
             {
                 "model": self.model_,
@@ -97,6 +97,7 @@ class RidgeModel(RULModel):
                 "x_std": self.x_std_,
                 "y_mean": self.y_mean_,
                 "y_std": self.y_std_,
+                "max_rul": self.max_rul,
             },
             p / "model.joblib",
         )
@@ -107,6 +108,8 @@ class RidgeModel(RULModel):
         self.model_ = state["model"]
         self.x_mean_, self.x_std_ = state["x_mean"], state["x_std"]
         self.y_mean_, self.y_std_ = state["y_mean"], state["y_std"]
+        if "max_rul" in state:
+            self.max_rul = state["max_rul"]
         self.is_fitted_ = True
         return self
 
@@ -166,15 +169,25 @@ class XGBModel(RULModel):
             # No validation split -> disable the constructor's early stopping.
             self.model_.set_params(early_stopping_rounds=None)
         self.model_.fit(F, y, verbose=False, **kwargs)
-        if y_val is not None and len(y_val):
+        self.is_fitted_ = True  # must be set before the internal predict() below
+        # Feature names must exist before predict_quantiles()/feature_importance()
+        # run on a loaded artifact; the trainer back-fills the real sensor codes.
+        self.sensor_names_ = feature_names([f"s{i}" for i in range(F.shape[1] // 6)])
+        if X_val is not None and y_val is not None and len(X_val):
             resid = self.predict(X_val) - np.asarray(y_val, dtype=float)
             self.resid_std_ = float(np.std(resid))
-        self.is_fitted_ = True
         return self
 
     def predict(self, X):
         self._check_fitted()
-        return clip_rul(self.model_.predict(window_features(X)), self.max_rul)
+        F = window_features(X)
+        if F.shape[1] != self.model_.n_features_in_:
+            raise ValueError(
+                f"xgb expects {self.model_.n_features_in_} features "
+                f"(={(self.model_.n_features_in_ // 6)} sensors), got {F.shape[1]} — "
+                "window feature width mismatch between training and serving."
+            )
+        return clip_rul(self.model_.predict(F), self.max_rul)
 
     def predict_quantiles(self, X, quantiles):
         """Booster-level quantile approximation via per-tree spread is not
@@ -202,9 +215,16 @@ class XGBModel(RULModel):
 
     def save(self, path):
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         self.model_.save_model(p / "model.ubj")
-        self._write_meta(p, {"resid_std": getattr(self, "resid_std_", None)})
+        self._write_meta(
+            p,
+            {
+                "resid_std": getattr(self, "resid_std_", None),
+                "n_flat_features": int(self.model_.n_features_in_),
+                "max_rul": self.max_rul,
+            },
+        )
 
     def load(self, path):
         import xgboost as xgb
@@ -214,6 +234,13 @@ class XGBModel(RULModel):
         self.model_.load_model(p / "model.ubj")
         meta = json.loads((p / "meta.json").read_text()) if (p / "meta.json").exists() else {}
         self.resid_std_ = meta.get("resid_std")
+        if "max_rul" in meta:
+            self.max_rul = meta["max_rul"]
+        n_feat = int(meta.get("n_flat_features", 0))
+        if n_feat:
+            self.sensor_names_ = feature_names(
+                [f"s{i}" for i in range(n_feat // 6)]
+            )
         self.is_fitted_ = True
         return self
 

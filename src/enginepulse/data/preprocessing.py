@@ -158,19 +158,27 @@ class PerConditionScaler(FeatureScaler):
         return out
 
     def state(self):
+        # Plain JSON-safe state: tuple keys become strings, stat pairs stay lists.
         return {
             "kind": "per_condition",
-            "by_cond": {str(k): v for k, v in self.by_cond_.items()},
-            "pooled": self.pooled_,
+            "by_cond": {
+                "|".join(str(x) for x in cond): [list(v[c]) for c in sorted(v)]
+                for cond, v in self.by_cond_.items()
+            },
+            "cols": sorted(next(iter(self.by_cond_.values())).keys())
+            if self.by_cond_ else [],
+            "pooled": {c: list(t) for c, t in self.pooled_.items()},
         }
 
     @staticmethod
     def _restore(state):
         s = PerConditionScaler()
-        import ast
-
-        s.by_cond_ = {ast.literal_eval(k): v for k, v in state["by_cond"].items()}
-        s.pooled_ = state["pooled"]
+        cols = state["cols"]
+        s.by_cond_ = {}
+        for key_str, stats_list in state["by_cond"].items():
+            cond = tuple(int(x) for x in key_str.split("|"))
+            s.by_cond_[cond] = {c: (v[0], v[1]) for c, v in zip(cols, stats_list)}
+        s.pooled_ = {c: (v[0], v[1]) for c, v in state["pooled"].items()}
         return s
 
 
