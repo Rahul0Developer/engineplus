@@ -51,6 +51,9 @@ def run_benchmark(
                     results.append(res)
                 except ImportError as exc:
                     logger.warning("Skipping %s on %s: %s", m, ds, exc)
+                except KeyError as exc:
+                    # Unknown/unbuildable model name — a config mistake, loud but non-fatal.
+                    logger.error("Cannot build model %r: %s", m, exc)
                 except Exception as exc:  # keep the benchmark resilient, but loud
                     logger.error("FAILED %s on %s seed %d: %s", m, ds, sd, exc)
     return results

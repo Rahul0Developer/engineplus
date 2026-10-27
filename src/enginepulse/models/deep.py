@@ -188,15 +188,28 @@ class _TorchModelBase(RULModel):
 
     def save(self, path):
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         torch.save(self.model_.state_dict(), p / "weights.pt")
-        self._write_meta(p, {"y_scale": self.y_scale_, "n_features": int(self.model_input_dim_)})
+        self._write_meta(
+            p,
+            {
+                "y_scale": self.y_scale_,
+                "n_features": int(self.model_input_dim_),
+                # Constructor kwargs so the API can rebuild the exact arch.
+                "arch_params": {k: v for k, v in self.params.items()},
+            },
+        )
 
     def load(self, path):
         p = Path(path)
         meta = json.loads((p / "meta.json").read_text())
         self.y_scale_ = meta["y_scale"]
-        self.model_ = self._build(meta["n_features"])
+        # Rebuild with the saved architecture kwargs (hidden size, heads...) so
+        # a plain build_model(name) from the registry matches the weights.
+        arch = {k: v for k, v in meta.get("arch_params", {}).items() if k != "max_rul"}
+        if "max_rul" in meta.get("arch_params", {}):
+            self.max_rul = meta["arch_params"]["max_rul"]
+        self.model_ = type(self)(seed=self.seed, **arch)._build(meta["n_features"])
         self.model_.load_state_dict(torch.load(p / "weights.pt", map_location=self.device))
         self.is_fitted_ = True
         return self
