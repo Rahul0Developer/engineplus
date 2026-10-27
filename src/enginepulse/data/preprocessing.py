@@ -97,6 +97,17 @@ class GlobalScaler(FeatureScaler):
             out[c] = (out[c] - self.means_[c]) / self.stds_[c]
         return out
 
+    def inverse_transform(self, X, feature_cols):
+        """Undo scaling on a raw array whose last axis matches ``feature_cols``.
+
+        Serving needs this to report window values back in sensor units; the
+        pair lives together so nobody forgets one half of it.
+        """
+        X = np.asarray(X, dtype=float)
+        mu = np.array([self.means_[c] for c in feature_cols], dtype=float)
+        sd = np.array([self.stds_[c] for c in feature_cols], dtype=float)
+        return X * sd + mu
+
     def state(self):
         return {"kind": "global", "means": self.means_, "stds": self.stds_}
 
