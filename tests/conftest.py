@@ -25,9 +25,10 @@ def make_engine_table(
 ) -> pd.DataFrame:
     """Build a raw-format dataframe: unit, time, 3 op settings, 21 sensors.
 
-    Sensors 0..5 are constant/near-constant (like the real dead positions),
-    the rest carry a linear degradation trend + noise so regressors have
-    something real to learn.
+    The five dead positions (1-based 2, 11, 17, 20, 21) are exactly flat in
+    every engine — like the zeroed columns in the real C-MAPSS files — while
+    the remaining 16 sensors carry a linear degradation trend + noise so
+    regressors have something real to learn.
     """
     rows = []
     # Dead sensor positions: 1-based columns 2, 11, 17, 20, 21 (0-based 1, 10,
@@ -45,9 +46,12 @@ def make_engine_table(
         # across every engine (same value everywhere, like a zeroed column).
         for c in dead:
             sens[:, c] = -7.0
+        # Degradation trend + noise on the 16 informative sensors only; the
+        # live block is laid out so alive[0] -> column 0, alive[1] -> column 2,
+        # etc. (dead positions keep their flat value).
         live = base[None, :] + np.outer(t / max(n, 1), drift) + rng.normal(scale=0.1, size=(n, len(alive)))
-        # The 16 informative sensors (all except the five dead positions).
-        sens[:, alive] = live
+        for j, col in enumerate(alive):
+            sens[:, col] = live[:, j]
         ops = np.tile([100.0 + cond, 500.0 + 100.0 * cond, 0.02 + 0.01 * cond], (n, 1))
         for i in range(n):
             rows.append([u, i + 1, *ops[i], *sens[i]])
