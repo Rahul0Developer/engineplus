@@ -66,7 +66,7 @@ def test_global_scaler_fit_on_subset_only(synthetic_train_test):
     s = GlobalScaler().fit(first_half, sens)
     out = s.transform(second_half, sens)
     col = sens[0]
-    expected = (second_half[col] - first_half[col].mean()) / first_half[col].std()
+    expected = (second_half[col] - first_half[col].mean()) / first_half[col].std(ddof=0)
     np.testing.assert_allclose(out[col].to_numpy(), expected.to_numpy(), rtol=1e-6)
     # Transform does not mutate the input frame.
     np.testing.assert_allclose(
@@ -171,7 +171,9 @@ def test_windows_never_cross_engine_boundary():
         # boundary gap (4->0 reset is absent here, so check unit alignment).
         assert ws.units[i] in (1, 2)
     last_of_e1 = ws.X[1, :, 0]
-    assert last_of_e1.tolist() == [2.0, 3.0]  # t=3,4 of unit 1 — no t=5 (unit 2)
+    assert last_of_e1.tolist() == [1.0, 2.0, 3.0]  # t=2..4 of unit 1 — no t=5 (unit 2)
+    first_of_e2 = ws.X[2, :, 0]
+    assert first_of_e2.tolist() == [4.0, 5.0, 6.0]  # all of unit 2
 
 
 def test_last_window_sampler_one_per_engine():
@@ -218,14 +220,24 @@ def test_NO_LEAKAGE_engine_ids_disjoint_across_splits(prepared):
 
 
 def test_test_engines_are_the_held_out_ones(prepared, fake_dataset):
-    """Test-set engines must not appear among training engines either."""
-    ds_units = set(fake_dataset.train["unit"].unique())
+    """The official test split is a separate fleet; unit *numbers* restart at 1.
+
+    What must hold (and what leaky notebooks get wrong) is that the published
+    ground-truth RUL of each test engine matches its own final trajectory row —
+    i.e. test targets come from the test files only, never from train rows.
+    """
     test_units = set(int(u) for u in prepared.test_units)
-    assert test_units.isdisjoint(ds_units) or test_units <= set(range(1, 7))
-    train_units = set(int(u) for u in prepared.train_units) | set(
-        int(u) for u in prepared.val_units
+    assert test_units == set(range(1, fake_dataset.n_test_units + 1))
+    # Ground truth attached to windows comes from the RUL file, one per engine.
+    true_by_unit = {e.unit: e.true_rul for e in fake_dataset.engines("test")}
+    last_time = (
+        fake_dataset.test.groupby("unit")["time"].max().to_dict()
     )
-    assert train_units & test_units == set()
+    for u, win_idx in zip(prepared.test_units, range(len(prepared.test_X))):
+        u = int(u)
+        # Window label equals capped published RUL for engines shorter than cap.
+        if last_time[u] - prepared.window_len < true_by_unit[u]:
+            assert prepared.test_true_rul[win_idx] == pytest.approx(true_by_unit[u])
 
 
 def test_scaler_fitted_on_train_engines_only(prepared):
@@ -255,9 +267,11 @@ def test_prepare_dataset_shapes_and_counts(prepared, fake_dataset):
 
 
 def test_prepare_respects_sensor_subset(fake_dataset):
-    p = prepare_dataset(fake_dataset, window_len=8, sensor_subset=["3", "4", "5"], seed=1)
-    assert p.feature_cols == ["3", "4", "5"]
-    assert p.train_X.shape[2] == 3
+    # Sensor "3" is one of the dead positions in the fixture, so a subset that
+    # includes it must silently keep only the sensors that actually survived.
+    p = prepare_dataset(fake_dataset, window_len=8, sensor_subset=["4", "5"], seed=1)
+    assert p.feature_cols == ["4", "5"]
+    assert p.train_X.shape[2] == 2
 
 
 def test_prepare_reproducible_across_calls(fake_dataset):

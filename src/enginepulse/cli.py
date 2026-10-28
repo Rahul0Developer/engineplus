@@ -265,6 +265,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "ask":
             from enginepulse.docqa.qa import DocQAEngine, llm_config_from_env
 
+            if not Path(args.index).exists():
+                print(
+                    f"Error: no docqa-index at {args.index}. "
+                    "Build one first with: enginepulse docqa-index <docs_dir> --out <index.json>",
+                    file=sys.stderr,
+                )
+                return 1
             engine = DocQAEngine.from_index(args.index, llm=llm_config_from_env())
             res = engine.ask(args.question, k=args.k)
             print(res["answer"])

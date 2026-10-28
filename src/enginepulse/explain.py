@@ -1,18 +1,22 @@
 """Per-sensor explainability: permutation importance + native tree importances.
 
 The question practitioners actually ask is "which sensors drive the RUL
-estimate?" — so everything aggregates back to sensor columns, even though the
-classical models see six statistical features per sensor (mean/std/min/max/
-last/slope, in that block order — see models/features.py).
+estimate?" So importance is always aggregated back up to sensor columns.
+
+Implementation note: we deliberately do NOT run sklearn's
+permutation_importance on the flat 6-stats-per-sensor feature matrix that the
+classical models consume. Shuffling one statistic column (say `std_15`) while
+`mean_15` stays put produces feature combinations the model never saw in
+training, which inflates importances with distribution-shift noise. Instead we
+permute whole sensor channels in raw window space (n, w, f): every statistic
+derived from that sensor moves together, exactly as it would in a real faulty
+sensor reading. That is both more honest and simpler than adapting the flat
+matrix back into pseudo-windows.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.inspection import permutation_importance
-
-from enginepulse.models.features import feature_names, window_features
 
 # Number of statistics computed per sensor inside window_features().
 _N_STATS = 6
@@ -27,25 +31,9 @@ def _sensor_of(feature_name: str, sensor_cols: list[str]) -> str | None:
     return best
 
 
-class _WindowAdapter(BaseEstimator, RegressorMixin):
-    """Adapts a window model (n,w,f) to sklearn's flat-feature (n, 6f) world.
-
-    permutation_importance shuffles individual columns of the flat matrix.
-    We rebuild a width-1 pseudo-window from the shuffled features before
-    handing them to the wrapped model; sensitivity is still measured correctly
-    because each sensor's stats move together only when ALL its columns are
-    permuted — which is what we aggregate over afterwards.
-    """
-
-    def __init__(self, model) -> None:
-        self.model = model
-
-    def predict(self, F: np.ndarray) -> np.ndarray:
-        n_sensors = F.shape[1] // _N_STATS
-        # Use the 'last' statistic block as the single timestep; shapes stay valid.
-        last = F[:, 4 * n_sensors : 5 * n_sensors]
-        pseudo = last[:, None, :].astype(np.float32)
-        return self.model.predict(pseudo)
+def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    err = np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)
+    return float(np.sqrt(np.mean(err**2)))
 
 
 def permutation_sensor_importance(
@@ -56,27 +44,34 @@ def permutation_sensor_importance(
     n_repeats: int = 8,
     seed: int = 42,
 ) -> dict[str, float]:
-    """Permutation importance (RMSE-based), summed back up to per-sensor values.
+    """Per-sensor permutation importance, measured as increase in RMSE.
 
-    Returns {sensor_code: importance}; larger means the model degrades more
-    when that sensor's information is destroyed.
+    For each sensor channel we shuffle its rows across windows `n_repeats`
+    times and record how much worse the (already fitted) model gets. Larger
+    importance means the model degrades more when that sensor's information
+    is destroyed. Evaluation happens on whichever (X, y) you pass — call it
+    with validation windows, not training windows, or you measure
+    memorisation instead of generalisation sensitivity.
+
+    Returns {sensor_code: mean_importance}, sorted most important first.
     """
-    F = window_features(X).astype(np.float64)
-    names = feature_names(sensor_cols)
-    f_imp = permutation_importance(
-        _WindowAdapter(model),
-        F,
-        np.asarray(y, dtype=np.float64),
-        scoring="neg_root_mean_squared_error",
-        n_repeats=n_repeats,
-        random_state=seed,
-    ).importances_mean
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y, dtype=np.float64)
+    if X.ndim != 3 or X.shape[2] != len(sensor_cols):
+        raise ValueError(
+            f"expected windows of shape (n, w, {len(sensor_cols)}), got {X.shape}"
+        )
+    rng = np.random.default_rng(seed)
+    baseline = _rmse(y, model.predict(X))
 
-    out = {s: 0.0 for s in sensor_cols}
-    for nm, val in zip(names, f_imp):
-        s = _sensor_of(nm, sensor_cols)
-        if s is not None:
-            out[s] += float(val)
+    out: dict[str, float] = {}
+    for j, sensor in enumerate(sensor_cols):
+        deltas = []
+        for _ in range(n_repeats):
+            Xp = X.copy()
+            Xp[:, :, j] = Xp[rng.permutation(len(Xp)), :, j]
+            deltas.append(_rmse(y, model.predict(Xp)) - baseline)
+        out[sensor] = float(np.mean(deltas))
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
