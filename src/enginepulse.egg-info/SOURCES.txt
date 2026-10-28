@@ -38,8 +38,16 @@ src/enginepulse/models/registry.py
 src/enginepulse/train/__init__.py
 src/enginepulse/train/benchmark.py
 src/enginepulse/train/trainer.py
+tests/test_api.py
+tests/test_cli.py
+tests/test_data.py
+tests/test_download.py
 tests/test_loader.py
 tests/test_metrics.py
 tests/test_models.py
+tests/test_preprocess.py
 tests/test_preprocessing.py
+tests/test_trainer.py
+tests/test_uncertainty_explain.py
+tests/test_utils.py
 tests/test_windows.py

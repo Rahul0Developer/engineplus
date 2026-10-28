@@ -7,6 +7,8 @@ so the pipeline under test is the same code path a real run takes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -28,22 +30,24 @@ def make_engine_table(
     something real to learn.
     """
     rows = []
+    # Dead sensor positions: 1-based columns 2, 11, 17, 20, 21 (0-based 1, 10,
+    # 16, 19, 20), mirroring the flat sensors in the real C-MAPSS files.
+    dead = (1, 10, 16, 19, 20)
+    alive = [c for c in range(21) if c not in dead]
     for u in units:
         n = int(rng.integers(*n_steps_range))
         cond = int(rng.integers(0, n_conditions))
-        base = rng.normal(size=16) * 5.0
-        drift = rng.normal(size=16) * 0.5 + 0.5  # per-engine degradation rate
+        base = rng.normal(size=len(alive)) * 5.0
+        drift = rng.normal(size=len(alive)) * 0.5 + 0.5  # per-engine degradation rate
         t = np.arange(1, n + 1)
         sens = np.zeros((n, 21))
-        live = base[None, :] + np.outer(t / max(n, 1), drift) + rng.normal(scale=0.1, size=(n, 16))
-        # Positions 2, 11, 17, 20, 21 (1-based) stay flat, matching the real data.
-        sens[:, [0, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 18]] = live[:, :15]
-        sens[:, 1] = 500.0  # constant
-        sens[:, 10] = 0.0   # constant
-        sens[:, 19] = 0.0
-        sens[:, 20] = 0.0
-        # A few columns with only two distinct values -> near-constant.
-        sens[:, 17] = (t % 2).astype(float)
+        # One shared constant offset per dead position keeps them exactly flat
+        # across every engine (same value everywhere, like a zeroed column).
+        for c in dead:
+            sens[:, c] = -7.0
+        live = base[None, :] + np.outer(t / max(n, 1), drift) + rng.normal(scale=0.1, size=(n, len(alive)))
+        # The 16 informative sensors (all except the five dead positions).
+        sens[:, alive] = live
         ops = np.tile([100.0 + cond, 500.0 + 100.0 * cond, 0.02 + 0.01 * cond], (n, 1))
         for i in range(n):
             rows.append([u, i + 1, *ops[i], *sens[i]])
@@ -97,3 +101,40 @@ def prepared(fake_dataset):
         fake_dataset, window_len=10, max_rul=125, val_fraction=0.2, seed=42,
         scaler=GlobalScaler(),
     )
+
+
+# -- real-format FD001 / FD002 fixtures ---------------------------------------
+# tests/fixtures holds truncated copies of the official C-MAPSS text files in
+# the exact NASA layout (unit, time, 3 op settings, 21 sensors + RUL file).
+# They are synthetic-shaped stand-ins so the loader path is exercised on data
+# that looks like the real thing; the raw dataset itself is never redistributed.
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="session")
+def fd001_ds():
+    from enginepulse.data.loader import load_dataset
+
+    return load_dataset(FIXTURES_DIR, "FD001")
+
+
+@pytest.fixture(scope="session")
+def fd002_ds():
+    from enginepulse.data.loader import load_dataset
+
+    return load_dataset(FIXTURES_DIR, "FD002")
+
+
+@pytest.fixture(scope="session")
+def fixtures_dir():
+    """Directory holding the real-format C-MAPSS txt fixtures."""
+    return FIXTURES_DIR
+
+
+@pytest.fixture(scope="session")
+def prepared_fd001(fd001_ds):
+    """Leakage-safe prepared FD001 fixture (window 8, cap 30) for model/API tests."""
+    from enginepulse.data.preprocessing import prepare_dataset
+
+    return prepare_dataset(fd001_ds, window_len=8, max_rul=30, seed=42)

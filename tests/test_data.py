@@ -25,8 +25,11 @@ def test_add_train_rul_is_last_minus_current_time():
 
 
 def test_drop_constant_sensors_removes_flat_columns(synthetic_train_test):
-    train, _, _ = synthetic_train_test
-    out = drop_constant_sensors(train)
+    train, test, _ = synthetic_train_test
+    # Same combined-statistics path the loader uses: a sensor can look dead
+    # in one short engine yet be alive elsewhere, so we judge on both splits.
+    combined = pd.concat([train, test], ignore_index=True)
+    out = drop_constant_sensors(combined)
     kept = [c for c in out.columns if c in SENSOR_CODES]
     # Positions 2, 11, 17, 20, 21 (1-based) are flat in the fixture.
     assert "1" not in kept and "10" not in kept and "16" not in kept
