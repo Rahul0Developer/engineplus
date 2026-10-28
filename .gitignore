@@ -1,4 +1,2 @@
 __pycache__/
 *.pyc
-src/enginepulse.egg-info/
-.coverage

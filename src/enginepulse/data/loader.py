@@ -67,7 +67,9 @@ def _read_table(path: Path) -> pd.DataFrame:
     return df
 
 
-def drop_constant_sensors(df: pd.DataFrame, min_unique: int = 3) -> pd.DataFrame:
+def drop_constant_sensors(
+    df: pd.DataFrame, min_unique: int = 3, dead_positions: tuple[int, ...] | None = None
+) -> pd.DataFrame:
     """Drop sensor columns that are constant or near-constant.
 
     A sensor is considered dead when it takes fewer than ``min_unique``
@@ -75,13 +77,20 @@ def drop_constant_sensors(df: pd.DataFrame, min_unique: int = 3) -> pd.DataFrame
     practice (positions 2, 11, 17, 20, 21 in 1-based numbering — indices
     '1', '10', '16', '19', '20' here — are always zero/flat). Removed codes
     are recorded in ``df.attrs['dropped_sensors']`` for reporting.
+
+    ``dead_positions``, when given, is a set of official 1-based sensor
+    positions to treat as dead *regardless* of their observed variance. The
+    loader passes :data:`CONSTANT_SENSOR_POSITIONS` so the canonical flat
+    columns are dropped even if a particular subset shows them varying (and
+    so live sensors with only one or two measurements never sneak through).
     """
+    forced = {str(p - 1) for p in dead_positions} if dead_positions is not None else set()
     keep = [c for c in df.columns if c not in SENSOR_CODES]
     dropped = []
     for c in SENSOR_CODES:
         if c not in df.columns:
             continue
-        if df[c].nunique() < min_unique:
+        if c in forced or df[c].nunique() < min_unique:
             dropped.append(c)
         else:
             keep.append(c)
@@ -120,7 +129,7 @@ def load_dataset(data_dir: str | Path, name: str) -> Dataset:
     # Drop dead sensors consistently using BOTH splits' statistics so the kept
     # column set matches between train and test.
     combined = pd.concat([train, test], ignore_index=True)
-    combined = drop_constant_sensors(combined)
+    combined = drop_constant_sensors(combined, dead_positions=CONSTANT_SENSOR_POSITIONS)
     kept = [c for c in combined.columns if c in SENSOR_CODES]
     train = train[["unit", "time", "rul"] + OP_COLS + kept]
     test = test[["unit", "time"] + OP_COLS + kept]
