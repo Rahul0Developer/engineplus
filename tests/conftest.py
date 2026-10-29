@@ -31,10 +31,11 @@ def make_engine_table(
     regressors have something real to learn.
     """
     rows = []
-    # Dead sensor positions: 1-based columns 2, 11, 17, 20, 21 (0-based 1, 10,
-    # 16, 19, 20), mirroring the flat sensors in the real C-MAPSS files.
-    dead = (1, 10, 16, 19, 20)
-    alive = [c for c in range(21) if c not in dead]
+    # Dead sensors by CODE name (matches SENSOR_CODES / loader convention):
+    # codes '1', '10', '16', '19', '20' — the official 1-based positions
+    # 2, 11, 17, 20, 21 that are flat in every real C-MAPSS subset.
+    dead = {"1", "10", "16", "19", "20"}
+    alive = [c for c in range(21) if str(c) not in dead]
     for u in units:
         n = int(rng.integers(*n_steps_range))
         cond = int(rng.integers(0, n_conditions))
@@ -42,9 +43,9 @@ def make_engine_table(
         drift = rng.normal(size=len(alive)) * 0.5 + 0.5  # per-engine degradation rate
         t = np.arange(1, n + 1)
         sens = np.zeros((n, 21))
-        # One shared constant offset per dead position keeps them exactly flat
+        # One shared constant offset per dead code keeps them exactly flat
         # across every engine (same value everywhere, like a zeroed column).
-        for c in dead:
+        for c in sorted(int(x) for x in dead):
             sens[:, c] = -7.0
         # Degradation trend + noise on the 16 informative sensors only; the
         # live block is laid out so alive[0] -> column 0, alive[1] -> column 2,

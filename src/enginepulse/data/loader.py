@@ -22,6 +22,11 @@ OP_COLS = ["op1", "op2", "op3"]
 # Sensor positions (1-based) that are exactly zero/constant across all subsets.
 CONSTANT_SENSOR_POSITIONS = (2, 11, 17, 20, 21)
 
+# The same dead sensors expressed as column codes ("1".."21", i.e. position - 1).
+# Code names are the stable, human-readable way to refer to a sensor; prefer
+# these over raw positional indices when calling drop_constant_sensors directly.
+CONSTANT_SENSOR_CODES = tuple(str(p - 1) for p in CONSTANT_SENSOR_POSITIONS)
+
 
 @dataclass
 class EngineData:
@@ -68,13 +73,16 @@ def _read_table(path: Path) -> pd.DataFrame:
 
 
 def drop_constant_sensors(
-    df: pd.DataFrame, min_unique: int = 3, dead_positions: tuple[int, ...] | None = None
+    df: pd.DataFrame,
+    min_unique: int = 3,
+    dead_positions: tuple[int, ...] | None = None,
+    dead_codes: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     """Drop sensor columns that are constant or near-constant.
 
     A sensor is considered dead when it takes fewer than ``min_unique``
     distinct values across the whole table. This matches the usual C-MAPSS
-    practice (positions 2, 11, 17, 20, 21 in 1-based numbering — indices
+    practice (positions 2, 11, 17, 20, 21 in 1-based numbering — codes
     '1', '10', '16', '19', '20' here — are always zero/flat). Removed codes
     are recorded in ``df.attrs['dropped_sensors']`` for reporting.
 
@@ -83,8 +91,14 @@ def drop_constant_sensors(
     loader passes :data:`CONSTANT_SENSOR_POSITIONS` so the canonical flat
     columns are dropped even if a particular subset shows them varying (and
     so live sensors with only one or two measurements never sneak through).
+
+    ``dead_codes`` is the code-name equivalent (column names "1".."21");
+    prefer it over positional indices in tests and downstream code so the
+    naming convention stays consistent with :data:`SENSOR_CODES`.
     """
     forced = {str(p - 1) for p in dead_positions} if dead_positions is not None else set()
+    if dead_codes is not None:
+        forced |= {str(c) for c in dead_codes}
     keep = [c for c in df.columns if c not in SENSOR_CODES]
     dropped = []
     for c in SENSOR_CODES:
